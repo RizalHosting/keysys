@@ -1,4 +1,3 @@
-```js
 const { Client, GatewayIntentBits } = require("discord.js");
 const express = require("express");
 const mongoose = require("mongoose");
@@ -401,4 +400,4 @@ app.listen(PORT, () => {
 // ========================
 
 client.login(process.env.DISCORD_TOKEN);
-```
+
