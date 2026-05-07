@@ -1,14 +1,5 @@
-const {
-    Client,
-    GatewayIntentBits,
-    SlashCommandBuilder,
-    REST,
-    Routes,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle
-} = require("discord.js");
-
+```js
+const { Client, GatewayIntentBits } = require("discord.js");
 const express = require("express");
 const mongoose = require("mongoose");
 
@@ -16,21 +7,25 @@ const app = express();
 
 app.use(express.json());
 
-// ======================================
-// DISCORD BOT
-// ======================================
+// ========================
+// BOT
+// ========================
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
 });
 
-// ======================================
-// WEBHOOK LOGGER
-// ======================================
+// ========================
+// WEBHOOK
+// ========================
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-async function sendWebhook(title, description, color = 65280) {
+async function sendWebhook(title, description) {
 
     if (!WEBHOOK_URL) return;
 
@@ -46,8 +41,7 @@ async function sendWebhook(title, description, color = 65280) {
                     {
                         title,
                         description,
-                        color,
-                        timestamp: new Date()
+                        color: 65280
                     }
                 ]
             })
@@ -60,9 +54,9 @@ async function sendWebhook(title, description, color = 65280) {
     }
 }
 
-// ======================================
+// ========================
 // MONGODB
-// ======================================
+// ========================
 
 mongoose.connect(process.env.MONGO_URI)
 
@@ -78,9 +72,9 @@ mongoose.connect(process.env.MONGO_URI)
 
 });
 
-// ======================================
+// ========================
 // DATABASE
-// ======================================
+// ========================
 
 const keySchema = new mongoose.Schema({
 
@@ -109,9 +103,9 @@ const keySchema = new mongoose.Schema({
 
 const Key = mongoose.model("Key", keySchema);
 
-// ======================================
+// ========================
 // RANDOM KEY
-// ======================================
+// ========================
 
 function generateKey() {
 
@@ -122,187 +116,159 @@ function generateKey() {
 
 }
 
-// ======================================
+// ========================
 // READY
-// ======================================
+// ========================
 
-client.once("ready", async () => {
+client.once("ready", () => {
 
     console.log(`Logged in as ${client.user.tag}`);
 
-    const commands = [
+});
 
-        // =========================
-        // /gen
-        // =========================
+// ========================
+// COMMANDS
+// ========================
 
-        new SlashCommandBuilder()
-            .setName("gen")
-            .setDescription("Generate a key"),
+client.on("messageCreate", async (message) => {
 
-        // =========================
-        // /keyinfo
-        // =========================
+    if (message.author.bot) return;
 
-        new SlashCommandBuilder()
-            .setName("keyinfo")
-            .setDescription("Check your key info")
-            .addStringOption(option =>
-                option.setName("key")
-                    .setDescription("Your key")
-                    .setRequired(true)
-            )
+    // ====================
+    // !PING
+    // ====================
 
-    ].map(cmd => cmd.toJSON());
+    if (message.content === "!ping") {
 
-    const rest = new REST({
-        version: "10"
-    }).setToken(process.env.DISCORD_TOKEN);
-
-    try {
-
-        await rest.put(
-            Routes.applicationCommands(client.user.id),
-            {
-                body: commands
-            }
-        );
-
-        console.log("Slash commands registered");
-
-    } catch (err) {
-
-        console.log(err);
+        return message.reply("🏓 Pong!");
 
     }
 
-});
+    // ====================
+    // !GEN
+    // ====================
 
-// ======================================
-// COMMANDS
-// ======================================
+    if (message.content === "!gen") {
 
-client.on("interactionCreate", async (interaction) => {
+        try {
 
-    // ==================================
-    // SLASH COMMANDS
-    // ==================================
+            const key = generateKey();
 
-    if (interaction.isChatInputCommand()) {
+            await Key.create({
 
-        // ==================================
-        // /GEN
-        // ==================================
+                key,
 
-        if (interaction.commandName === "gen") {
+                ownerId: message.author.id,
 
-            await interaction.deferReply({
-                ephemeral: true
+                createdAt: Date.now()
+
             });
 
-            try {
-
-                const key = generateKey();
-
-                await Key.create({
-
-                    key,
-
-                    ownerId: interaction.user.id,
-
-                    createdAt: Date.now()
-
-                });
-
-                const row = new ActionRowBuilder()
-
-                    .addComponents(
-
-                        new ButtonBuilder()
-
-                            .setCustomId(`reset_${key}`)
-
-                            .setLabel("Reset HWID")
-
-                            .setStyle(ButtonStyle.Secondary)
-
-                    );
-
-                await interaction.editReply({
-
-                    content:
+            await message.reply(
 `🔑 Key Generated
 
-Key:
 ${key}
 
 Use:
-getgenv().vex_key = "${key}"`,
+getgenv().vex_key = "${key}"`
+            );
 
-                    components: [row]
-
-                });
-
-                await sendWebhook(
-                    "🔑 Key Generated",
-                    `User: <@${interaction.user.id}>
+            await sendWebhook(
+                "🔑 Key Generated",
+                `User: ${message.author.tag}
 Key: ${key}`
-                );
+            );
 
-            } catch (err) {
+        } catch (err) {
 
-                console.log(err);
+            console.log(err);
 
-                await interaction.editReply({
+            message.reply("❌ Error generating key");
 
-                    content: "❌ Error generating key"
-
-                });
-
-            }
         }
 
-        // ==================================
-        // /KEYINFO
-        // ==================================
+    }
 
-        if (interaction.commandName === "keyinfo") {
+    // ====================
+    // !RESET
+    // ====================
 
-            await interaction.deferReply({
-                ephemeral: true
+    if (message.content.startsWith("!reset ")) {
+
+        try {
+
+            const args = message.content.split(" ");
+
+            const key = args[1];
+
+            const data = await Key.findOne({
+                key
             });
 
-            try {
+            if (!data) {
 
-                const key = interaction.options.getString("key");
+                return message.reply("❌ Invalid key");
 
-                const data = await Key.findOne({
-                    key
-                });
+            }
 
-                if (!data) {
+            if (data.ownerId !== message.author.id) {
 
-                    return interaction.editReply({
+                return message.reply("❌ You do not own this key");
 
-                        content: "❌ Invalid key"
+            }
 
-                    });
+            data.hwid = null;
+            data.userId = null;
 
-                }
+            await data.save();
 
-                if (data.ownerId !== interaction.user.id) {
+            await message.reply("✅ HWID Reset Successful");
 
-                    return interaction.editReply({
+            await sendWebhook(
+                "♻️ HWID Reset",
+                `User: ${message.author.tag}
+Key: ${key}`
+            );
 
-                        content: "❌ You do not own this key"
+        } catch (err) {
 
-                    });
+            console.log(err);
 
-                }
+            message.reply("❌ Error resetting HWID");
 
-                await interaction.editReply({
+        }
 
-                    content:
+    }
+
+    // ====================
+    // !KEYINFO
+    // ====================
+
+    if (message.content.startsWith("!keyinfo ")) {
+
+        try {
+
+            const args = message.content.split(" ");
+
+            const key = args[1];
+
+            const data = await Key.findOne({
+                key
+            });
+
+            if (!data) {
+
+                return message.reply("❌ Invalid key");
+
+            }
+
+            if (data.ownerId !== message.author.id) {
+
+                return message.reply("❌ You do not own this key");
+
+            }
+
+            message.reply(
 `🔑 Key Info
 
 Key: ${data.key}
@@ -312,105 +278,25 @@ Executions: ${data.totalExecutions}
 HWID Locked:
 ${data.hwid ? "Yes" : "No"}
 
-Roblox Account Locked:
-${data.userId ? "Yes" : "No"}
+Account Locked:
+${data.userId ? "Yes" : "No"}`
+            );
 
-Created:
-${new Date(data.createdAt).toLocaleString()}`
+        } catch (err) {
 
-                });
+            console.log(err);
 
-            } catch (err) {
+            message.reply("❌ Error");
 
-                console.log(err);
-
-                await interaction.editReply({
-
-                    content: "❌ Error"
-
-                });
-
-            }
         }
-    }
 
-    // ==================================
-    // BUTTONS
-    // ==================================
-
-    if (interaction.isButton()) {
-
-        if (interaction.customId.startsWith("reset_")) {
-
-            await interaction.deferReply({
-                ephemeral: true
-            });
-
-            try {
-
-                const key = interaction.customId.replace("reset_", "");
-
-                const data = await Key.findOne({
-                    key
-                });
-
-                if (!data) {
-
-                    return interaction.editReply({
-
-                        content: "❌ Invalid key"
-
-                    });
-
-                }
-
-                if (data.ownerId !== interaction.user.id) {
-
-                    return interaction.editReply({
-
-                        content: "❌ You do not own this key"
-
-                    });
-
-                }
-
-                data.hwid = null;
-
-                data.userId = null;
-
-                await data.save();
-
-                await interaction.editReply({
-
-                    content: "✅ HWID Reset Successful"
-
-                });
-
-                await sendWebhook(
-                    "♻️ HWID Reset",
-                    `User: <@${interaction.user.id}>
-Key: ${key}`
-                );
-
-            } catch (err) {
-
-                console.log(err);
-
-                await interaction.editReply({
-
-                    content: "❌ Failed to reset HWID"
-
-                });
-
-            }
-        }
     }
 
 });
 
-// ======================================
+// ========================
 // API
-// ======================================
+// ========================
 
 app.get("/", (req, res) => {
 
@@ -418,9 +304,9 @@ app.get("/", (req, res) => {
 
 });
 
-// ======================================
+// ========================
 // CHECK KEY
-// ======================================
+// ========================
 
 app.post("/check", async (req, res) => {
 
@@ -498,9 +384,9 @@ Executions: ${data.totalExecutions}`
 
 });
 
-// ======================================
-// START API
-// ======================================
+// ========================
+// START
+// ========================
 
 const PORT = process.env.PORT || 3000;
 
@@ -510,8 +396,9 @@ app.listen(PORT, () => {
 
 });
 
-// ======================================
+// ========================
 // LOGIN
-// ======================================
+// ========================
 
 client.login(process.env.DISCORD_TOKEN);
+```
