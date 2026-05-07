@@ -16,21 +16,21 @@ const app = express();
 
 app.use(express.json());
 
-// =======================
-// BOT
-// =======================
+// ======================================
+// DISCORD BOT
+// ======================================
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// =======================
-// WEBHOOK
-// =======================
+// ======================================
+// WEBHOOK LOGGER
+// ======================================
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-async function sendWebhook(title, description) {
+async function sendWebhook(title, description, color = 65280) {
 
     if (!WEBHOOK_URL) return;
 
@@ -44,9 +44,10 @@ async function sendWebhook(title, description) {
             body: JSON.stringify({
                 embeds: [
                     {
-                        title: title,
-                        description: description,
-                        color: 65280
+                        title,
+                        description,
+                        color,
+                        timestamp: new Date()
                     }
                 ]
             })
@@ -59,9 +60,9 @@ async function sendWebhook(title, description) {
     }
 }
 
-// =======================
+// ======================================
 // MONGODB
-// =======================
+// ======================================
 
 mongoose.connect(process.env.MONGO_URI)
 
@@ -77,9 +78,9 @@ mongoose.connect(process.env.MONGO_URI)
 
 });
 
-// =======================
+// ======================================
 // DATABASE
-// =======================
+// ======================================
 
 const keySchema = new mongoose.Schema({
 
@@ -97,38 +98,60 @@ const keySchema = new mongoose.Schema({
         default: null
     },
 
+    totalExecutions: {
+        type: Number,
+        default: 0
+    },
+
     createdAt: Number
 
 });
 
 const Key = mongoose.model("Key", keySchema);
 
-// =======================
+// ======================================
 // RANDOM KEY
-// =======================
+// ======================================
 
 function generateKey() {
 
     return Math.random()
         .toString(36)
-        .substring(2, 10)
+        .substring(2, 12)
         .toUpperCase();
 
 }
 
-// =======================
+// ======================================
 // READY
-// =======================
+// ======================================
 
 client.once("ready", async () => {
 
-    console.log("Bot Online");
+    console.log(`Logged in as ${client.user.tag}`);
 
     const commands = [
 
+        // =========================
+        // /gen
+        // =========================
+
         new SlashCommandBuilder()
             .setName("gen")
-            .setDescription("Generate a key")
+            .setDescription("Generate a key"),
+
+        // =========================
+        // /keyinfo
+        // =========================
+
+        new SlashCommandBuilder()
+            .setName("keyinfo")
+            .setDescription("Check your key info")
+            .addStringOption(option =>
+                option.setName("key")
+                    .setDescription("Your key")
+                    .setRequired(true)
+            )
 
     ].map(cmd => cmd.toJSON());
 
@@ -145,7 +168,7 @@ client.once("ready", async () => {
             }
         );
 
-        console.log("Commands Registered");
+        console.log("Slash commands registered");
 
     } catch (err) {
 
@@ -155,200 +178,329 @@ client.once("ready", async () => {
 
 });
 
-// =======================
+// ======================================
 // COMMANDS
-// =======================
+// ======================================
 
 client.on("interactionCreate", async (interaction) => {
 
-    // ===================
-    // SLASH COMMAND
-    // ===================
+    // ==================================
+    // SLASH COMMANDS
+    // ==================================
 
     if (interaction.isChatInputCommand()) {
 
+        // ==================================
+        // /GEN
+        // ==================================
+
         if (interaction.commandName === "gen") {
 
-            const key = generateKey();
-
-            await Key.create({
-
-                key: key,
-
-                ownerId: interaction.user.id,
-
-                createdAt: Date.now()
-
+            await interaction.deferReply({
+                ephemeral: true
             });
 
-            const row = new ActionRowBuilder()
+            try {
 
-                .addComponents(
+                const key = generateKey();
 
-                    new ButtonBuilder()
+                await Key.create({
 
-                        .setCustomId(`reset_${key}`)
+                    key,
 
-                        .setLabel("Reset HWID")
+                    ownerId: interaction.user.id,
 
-                        .setStyle(ButtonStyle.Secondary)
+                    createdAt: Date.now()
 
-                );
+                });
 
-            await interaction.reply({
+                const row = new ActionRowBuilder()
 
-                content:
+                    .addComponents(
+
+                        new ButtonBuilder()
+
+                            .setCustomId(`reset_${key}`)
+
+                            .setLabel("Reset HWID")
+
+                            .setStyle(ButtonStyle.Secondary)
+
+                    );
+
+                await interaction.editReply({
+
+                    content:
 `🔑 Key Generated
 
-${key}`,
+Key:
+${key}
 
-                components: [row],
+Use:
+getgenv().vex_key = "${key}"`,
 
+                    components: [row]
+
+                });
+
+                await sendWebhook(
+                    "🔑 Key Generated",
+                    `User: <@${interaction.user.id}>
+Key: ${key}`
+                );
+
+            } catch (err) {
+
+                console.log(err);
+
+                await interaction.editReply({
+
+                    content: "❌ Error generating key"
+
+                });
+
+            }
+        }
+
+        // ==================================
+        // /KEYINFO
+        // ==================================
+
+        if (interaction.commandName === "keyinfo") {
+
+            await interaction.deferReply({
                 ephemeral: true
-
             });
 
-            await sendWebhook(
-                "Key Generated",
-                `User: <@${interaction.user.id}>\nKey: ${key}`
-            );
+            try {
+
+                const key = interaction.options.getString("key");
+
+                const data = await Key.findOne({
+                    key
+                });
+
+                if (!data) {
+
+                    return interaction.editReply({
+
+                        content: "❌ Invalid key"
+
+                    });
+
+                }
+
+                if (data.ownerId !== interaction.user.id) {
+
+                    return interaction.editReply({
+
+                        content: "❌ You do not own this key"
+
+                    });
+
+                }
+
+                await interaction.editReply({
+
+                    content:
+`🔑 Key Info
+
+Key: ${data.key}
+
+Executions: ${data.totalExecutions}
+
+HWID Locked:
+${data.hwid ? "Yes" : "No"}
+
+Roblox Account Locked:
+${data.userId ? "Yes" : "No"}
+
+Created:
+${new Date(data.createdAt).toLocaleString()}`
+
+                });
+
+            } catch (err) {
+
+                console.log(err);
+
+                await interaction.editReply({
+
+                    content: "❌ Error"
+
+                });
+
+            }
         }
     }
 
-    // ===================
+    // ==================================
     // BUTTONS
-    // ===================
+    // ==================================
 
     if (interaction.isButton()) {
 
         if (interaction.customId.startsWith("reset_")) {
 
-            const key = interaction.customId.replace("reset_", "");
-
-            const data = await Key.findOne({
-                key: key
-            });
-
-            if (!data) {
-
-                return interaction.reply({
-
-                    content: "Invalid Key",
-
-                    ephemeral: true
-
-                });
-
-            }
-
-            if (data.ownerId !== interaction.user.id) {
-
-                return interaction.reply({
-
-                    content: "You do not own this key",
-
-                    ephemeral: true
-
-                });
-
-            }
-
-            data.hwid = null;
-            data.userId = null;
-
-            await data.save();
-
-            await interaction.reply({
-
-                content: "✅ HWID Reset Successful",
-
+            await interaction.deferReply({
                 ephemeral: true
-
             });
 
-            await sendWebhook(
-                "HWID Reset",
-                `User: <@${interaction.user.id}>\nKey: ${key}`
-            );
+            try {
+
+                const key = interaction.customId.replace("reset_", "");
+
+                const data = await Key.findOne({
+                    key
+                });
+
+                if (!data) {
+
+                    return interaction.editReply({
+
+                        content: "❌ Invalid key"
+
+                    });
+
+                }
+
+                if (data.ownerId !== interaction.user.id) {
+
+                    return interaction.editReply({
+
+                        content: "❌ You do not own this key"
+
+                    });
+
+                }
+
+                data.hwid = null;
+
+                data.userId = null;
+
+                await data.save();
+
+                await interaction.editReply({
+
+                    content: "✅ HWID Reset Successful"
+
+                });
+
+                await sendWebhook(
+                    "♻️ HWID Reset",
+                    `User: <@${interaction.user.id}>
+Key: ${key}`
+                );
+
+            } catch (err) {
+
+                console.log(err);
+
+                await interaction.editReply({
+
+                    content: "❌ Failed to reset HWID"
+
+                });
+
+            }
         }
     }
 
 });
 
-// =======================
+// ======================================
 // API
-// =======================
+// ======================================
 
 app.get("/", (req, res) => {
 
-    res.send("Online");
+    res.send("Key System Online");
 
 });
 
-// =======================
-// CHECK
-// =======================
+// ======================================
+// CHECK KEY
+// ======================================
 
 app.post("/check", async (req, res) => {
 
-    const { key, hwid, userId } = req.body;
+    try {
 
-    const data = await Key.findOne({
-        key: key
-    });
+        const { key, hwid, userId } = req.body;
 
-    // INVALID
-    if (!data) {
-
-        return res.json({
-            status: "INVALID_KEY"
+        const data = await Key.findOne({
+            key
         });
 
-    }
+        // INVALID
+        if (!data) {
 
-    // FIRST LOCK
-    if (!data.hwid) {
+            return res.json({
+                status: "INVALID_KEY"
+            });
 
-        data.hwid = hwid;
+        }
 
-        data.userId = userId;
+        // FIRST LOCK
+        if (!data.hwid) {
+
+            data.hwid = hwid;
+
+            data.userId = userId;
+
+            await data.save();
+
+        }
+
+        // DEVICE LOCK
+        if (data.hwid !== hwid) {
+
+            return res.json({
+                status: "DEVICE_LOCKED"
+            });
+
+        }
+
+        // ACCOUNT LOCK
+        if (data.userId !== userId) {
+
+            return res.json({
+                status: "ACCOUNT_MISMATCH"
+            });
+
+        }
+
+        // EXECUTION
+        data.totalExecutions += 1;
 
         await data.save();
 
-    }
-
-    // DEVICE LOCK
-    if (data.hwid !== hwid) {
+        await sendWebhook(
+            "✅ Script Executed",
+            `Key: ${key}
+UserId: ${userId}
+Executions: ${data.totalExecutions}`
+        );
 
         return res.json({
-            status: "DEVICE_LOCKED"
+            status: "VALID"
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        return res.json({
+            status: "ERROR"
         });
 
     }
-
-    // ACCOUNT LOCK
-    if (data.userId !== userId) {
-
-        return res.json({
-            status: "ACCOUNT_MISMATCH"
-        });
-
-    }
-
-    await sendWebhook(
-        "Script Executed",
-        `Key: ${key}\nUserId: ${userId}`
-    );
-
-    return res.json({
-        status: "VALID"
-    });
 
 });
 
-// =======================
-// START
-// =======================
+// ======================================
+// START API
+// ======================================
 
 const PORT = process.env.PORT || 3000;
 
@@ -358,8 +510,8 @@ app.listen(PORT, () => {
 
 });
 
-// =======================
+// ======================================
 // LOGIN
-// =======================
+// ======================================
 
 client.login(process.env.DISCORD_TOKEN);
