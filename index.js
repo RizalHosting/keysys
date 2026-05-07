@@ -1,4 +1,3 @@
-```js
 const {
     Client,
     GatewayIntentBits,
@@ -17,21 +16,21 @@ const app = express();
 
 app.use(express.json());
 
-// =========================
+// =======================
 // BOT
-// =========================
+// =======================
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// =========================
+// =======================
 // WEBHOOK
-// =========================
+// =======================
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-async function logWebhook(title, description) {
+async function sendWebhook(title, description) {
 
     if (!WEBHOOK_URL) return;
 
@@ -60,9 +59,9 @@ async function logWebhook(title, description) {
     }
 }
 
-// =========================
+// =======================
 // MONGODB
-// =========================
+// =======================
 
 mongoose.connect(process.env.MONGO_URI)
 
@@ -72,15 +71,15 @@ mongoose.connect(process.env.MONGO_URI)
 
 })
 
-.catch(err => {
+.catch((err) => {
 
     console.log(err);
 
 });
 
-// =========================
+// =======================
 // DATABASE
-// =========================
+// =======================
 
 const keySchema = new mongoose.Schema({
 
@@ -104,31 +103,32 @@ const keySchema = new mongoose.Schema({
 
 const Key = mongoose.model("Key", keySchema);
 
-// =========================
+// =======================
 // RANDOM KEY
-// =========================
+// =======================
 
-function randomKey() {
+function generateKey() {
 
     return Math.random()
         .toString(36)
         .substring(2, 10)
         .toUpperCase();
+
 }
 
-// =========================
+// =======================
 // READY
-// =========================
+// =======================
 
 client.once("ready", async () => {
 
-    console.log(`Logged in as ${client.user.tag}`);
+    console.log("Bot Online");
 
     const commands = [
 
         new SlashCommandBuilder()
             .setName("gen")
-            .setDescription("Generate key")
+            .setDescription("Generate a key")
 
     ].map(cmd => cmd.toJSON());
 
@@ -136,30 +136,40 @@ client.once("ready", async () => {
         version: "10"
     }).setToken(process.env.DISCORD_TOKEN);
 
-    await rest.put(
-        Routes.applicationCommands(client.user.id),
-        { body: commands }
-    );
+    try {
 
-    console.log("Slash commands registered");
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            {
+                body: commands
+            }
+        );
+
+        console.log("Commands Registered");
+
+    } catch (err) {
+
+        console.log(err);
+
+    }
 
 });
 
-// =========================
+// =======================
 // COMMANDS
-// =========================
+// =======================
 
-client.on("interactionCreate", async interaction => {
+client.on("interactionCreate", async (interaction) => {
 
-    // =====================
-    // /gen
-    // =====================
+    // ===================
+    // SLASH COMMAND
+    // ===================
 
     if (interaction.isChatInputCommand()) {
 
         if (interaction.commandName === "gen") {
 
-            const key = randomKey();
+            const key = generateKey();
 
             await Key.create({
 
@@ -198,17 +208,16 @@ ${key}`,
 
             });
 
-            await logWebhook(
+            await sendWebhook(
                 "Key Generated",
-                `User: <@${interaction.user.id}>
-Key: ${key}`
+                `User: <@${interaction.user.id}>\nKey: ${key}`
             );
         }
     }
 
-    // =====================
-    // RESET BUTTON
-    // =====================
+    // ===================
+    // BUTTONS
+    // ===================
 
     if (interaction.isButton()) {
 
@@ -232,7 +241,6 @@ Key: ${key}`
 
             }
 
-            // OWNER CHECK
             if (data.ownerId !== interaction.user.id) {
 
                 return interaction.reply({
@@ -245,7 +253,6 @@ Key: ${key}`
 
             }
 
-            // RESET
             data.hwid = null;
             data.userId = null;
 
@@ -259,18 +266,18 @@ Key: ${key}`
 
             });
 
-            await logWebhook(
+            await sendWebhook(
                 "HWID Reset",
-                `User: <@${interaction.user.id}>
-Key: ${key}`
+                `User: <@${interaction.user.id}>\nKey: ${key}`
             );
         }
     }
+
 });
 
-// =========================
+// =======================
 // API
-// =========================
+// =======================
 
 app.get("/", (req, res) => {
 
@@ -278,9 +285,9 @@ app.get("/", (req, res) => {
 
 });
 
-// =========================
+// =======================
 // CHECK
-// =========================
+// =======================
 
 app.post("/check", async (req, res) => {
 
@@ -310,7 +317,7 @@ app.post("/check", async (req, res) => {
 
     }
 
-    // HWID LOCK
+    // DEVICE LOCK
     if (data.hwid !== hwid) {
 
         return res.json({
@@ -328,10 +335,9 @@ app.post("/check", async (req, res) => {
 
     }
 
-    await logWebhook(
+    await sendWebhook(
         "Script Executed",
-        `Key: ${key}
-UserId: ${userId}`
+        `Key: ${key}\nUserId: ${userId}`
     );
 
     return res.json({
@@ -340,9 +346,9 @@ UserId: ${userId}`
 
 });
 
-// =========================
+// =======================
 // START
-// =========================
+// =======================
 
 const PORT = process.env.PORT || 3000;
 
@@ -352,9 +358,8 @@ app.listen(PORT, () => {
 
 });
 
-// =========================
+// =======================
 // LOGIN
-// =========================
+// =======================
 
 client.login(process.env.DISCORD_TOKEN);
-```
